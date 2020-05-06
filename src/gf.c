@@ -1485,17 +1485,23 @@ static void update_max_args(jl_methtable_t *mt, jl_value_t *type)
         mt->max_args = na;
 }
 
-JL_DLLEXPORT int jl_debug_method_invalidation = 0;
+static jl_array_t *_jl_debug_method_invalidation = NULL;
+JL_DLLEXPORT jl_value_t *jl_debug_method_invalidation(int state)
+{
+    if (state) {
+        _jl_debug_method_invalidation = jl_alloc_array_1d(jl_array_any_type, 0);
+        return (jl_value_t*) _jl_debug_method_invalidation;
+    }
+    _jl_debug_method_invalidation = NULL;
+    return jl_nothing;
+}
 
 // recursively invalidate cached methods that had an edge to a replaced method
 static void invalidate_method_instance(jl_method_instance_t *replaced, size_t max_world, int depth)
 {
-    if (jl_debug_method_invalidation) {
-        int d0 = depth;
-        while (d0-- > 0)
-            jl_uv_puts(JL_STDOUT, " ", 1);
-        jl_static_show(JL_STDOUT, (jl_value_t*)replaced);
-        jl_uv_puts(JL_STDOUT, "\n", 1);
+    if (_jl_debug_method_invalidation) {
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)replaced);
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, jl_box_int32(depth));
     }
     if (!jl_is_method(replaced->def.method))
         return; // shouldn't happen, but better to be safe
@@ -1622,10 +1628,9 @@ static int invalidate_mt_cache(jl_typemap_entry_t *oldentry, void *closure0)
             }
         }
         if (intersects) {
-            if (jl_debug_method_invalidation) {
-                jl_uv_puts(JL_STDOUT, "-- ", 3);
-                jl_static_show(JL_STDOUT, (jl_value_t*)mi);
-                jl_uv_puts(JL_STDOUT, "\n", 1);
+            if (_jl_debug_method_invalidation) {
+                jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)mi);
+                jl_array_ptr_1d_push(_jl_debug_method_invalidation, jl_cstr_to_string("mt"));
             }
             oldentry->max_world = env->max_world;
         }
@@ -1772,12 +1777,8 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
             }
         }
     }
-    if (invalidated && jl_debug_method_invalidation) {
-        jl_uv_puts(JL_STDOUT, ">> ", 3);
-        jl_static_show(JL_STDOUT, (jl_value_t*)method);
-        jl_uv_puts(JL_STDOUT, " ", 1);
-        jl_static_show(JL_STDOUT, (jl_value_t*)type);
-        jl_uv_puts(JL_STDOUT, "\n", 1);
+    if (invalidated && _jl_debug_method_invalidation) {
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)method);
     }
     update_max_args(mt, type);
     JL_UNLOCK(&mt->writelock);
