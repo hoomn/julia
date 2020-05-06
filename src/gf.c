@@ -1485,10 +1485,15 @@ static void update_max_args(jl_methtable_t *mt, jl_value_t *type)
         mt->max_args = na;
 }
 
-static jl_array_t *_jl_debug_method_invalidation = NULL;
+jl_array_t *_jl_debug_method_invalidation JL_GLOBALLY_ROOTED = NULL;
 JL_DLLEXPORT jl_value_t *jl_debug_method_invalidation(int state)
 {
+    /* After calling with `state = 1`, caller is responsible for
+       holding a reference to the returned array until this is called
+       again with `state = 0`. */
     if (state) {
+        if (_jl_debug_method_invalidation)
+            return (jl_value_t*) _jl_debug_method_invalidation;
         _jl_debug_method_invalidation = jl_alloc_array_1d(jl_array_any_type, 0);
         return (jl_value_t*) _jl_debug_method_invalidation;
     }
@@ -1500,8 +1505,13 @@ JL_DLLEXPORT jl_value_t *jl_debug_method_invalidation(int state)
 static void invalidate_method_instance(jl_method_instance_t *replaced, size_t max_world, int depth)
 {
     if (_jl_debug_method_invalidation) {
+        jl_value_t *boxeddepth = NULL;
+        JL_GC_PUSH1(&boxeddepth);
         jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)replaced);
-        jl_array_ptr_1d_push(_jl_debug_method_invalidation, jl_box_int32(depth));
+        boxeddepth = jl_box_int32(depth);
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, boxeddepth);
+        jl_gc_wb(_jl_debug_method_invalidation, boxeddepth);
+        JL_GC_POP();
     }
     if (!jl_is_method(replaced->def.method))
         return; // shouldn't happen, but better to be safe
@@ -1629,8 +1639,13 @@ static int invalidate_mt_cache(jl_typemap_entry_t *oldentry, void *closure0)
         }
         if (intersects) {
             if (_jl_debug_method_invalidation) {
+                jl_value_t *loctag = NULL;
+                JL_GC_PUSH1(&loctag);
                 jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)mi);
-                jl_array_ptr_1d_push(_jl_debug_method_invalidation, jl_cstr_to_string("mt"));
+                loctag = jl_cstr_to_string("mt");
+                jl_gc_wb(_jl_debug_method_invalidation, loctag);
+                jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
+                JL_GC_POP();
             }
             oldentry->max_world = env->max_world;
         }
