@@ -2294,7 +2294,7 @@ static void jl_insert_methods(jl_array_t *list)
     }
 }
 
-extern int jl_debug_method_invalidation;
+extern jl_array_t *_jl_debug_method_invalidation;
 
 // verify that these edges intersect with the same methods as before
 static void jl_verify_edges(jl_array_t *targets, jl_array_t **pvalids)
@@ -2386,9 +2386,9 @@ static void jl_insert_backedges(jl_array_t *list, jl_array_t *targets)
             }
         }
         else {
-            if (jl_debug_method_invalidation) {
-                jl_static_show(JL_STDOUT, (jl_value_t*)caller);
-                jl_uv_puts(JL_STDOUT, "<<<\n", 4);
+            if (_jl_debug_method_invalidation) {
+                jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)caller);
+                jl_array_ptr_1d_push(_jl_debug_method_invalidation, jl_cstr_to_string("insert_backedges"));
             }
         }
     }
