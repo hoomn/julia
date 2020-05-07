@@ -709,3 +709,20 @@ Base.IteratorSize(::Type{<:OpenInterval}) = Base.SizeUnknown()
     @test 3 ∈ i
     @test issubset(3, i)
 end
+
+@testset "IdSet" begin
+    A = Base.IdSet{Int}(1:4)
+    @test !isempty(A)
+    B = copy(A)
+    @test A ⊆ B
+    @test B ⊆ A
+    A = filter!(isodd, A)
+    @test A ⊆ B
+    @test !(B ⊆ A)
+    @test !isempty(A)
+    a = pop!(A, 1)
+    @test a == 1
+    @test !isempty(A)
+    A = empty!(A)
+    @test isempty(A)
+end
