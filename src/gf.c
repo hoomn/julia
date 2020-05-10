@@ -1642,7 +1642,7 @@ static int invalidate_mt_cache(jl_typemap_entry_t *oldentry, void *closure0)
                 jl_value_t *loctag = NULL;
                 JL_GC_PUSH1(&loctag);
                 jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)mi);
-                loctag = jl_cstr_to_string("mt");
+                loctag = jl_cstr_to_string("invalidate_mt_cache");
                 jl_gc_wb(_jl_debug_method_invalidation, loctag);
                 jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
                 JL_GC_POP();
@@ -1693,12 +1693,33 @@ JL_DLLEXPORT void jl_method_table_disable(jl_methtable_t *mt, jl_method_t *metho
     jl_typemap_visitor(mt->cache, invalidate_mt_cache, (void*)&mt_cache_env);
     // Invalidate the backedges
     jl_svec_t *specializations = methodentry->func.method->specializations;
+    int invalidated = 0;
+    jl_value_t *loctag = NULL;
+    JL_GC_PUSH1(&loctag);
     size_t i, l = jl_svec_len(specializations);
     for (i = 0; i < l; i++) {
         jl_method_instance_t *mi = (jl_method_instance_t*)jl_svecref(specializations, i);
-        if (mi)
-            invalidate_backedges(mi, methodentry->max_world);
+        if (mi) {
+            invalidated = 1;
+            if (invalidate_backedges(mi, methodentry->max_world))
+                if (_jl_debug_method_invalidation) {
+                    if (!loctag) {
+                        loctag = jl_cstr_to_string("jl_method_table_disable");
+                        jl_gc_wb(_jl_debug_method_invalidation, loctag);
+                    }
+                    jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
+                }
+        }
     }
+    if (invalidated && _jl_debug_method_invalidation) {
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)method);
+        if (!loctag) {
+            loctag = jl_cstr_to_string("jl_method_table_disable");
+            jl_gc_wb(_jl_debug_method_invalidation, loctag);
+        }
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
+    }
+    JL_GC_POP();
     JL_UNLOCK(&mt->writelock);
 }
 
@@ -1713,7 +1734,8 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
         method->primary_world = ++jl_world_counter;
     size_t max_world = method->primary_world - 1;
     int invalidated = 0;
-    JL_GC_PUSH1(&oldvalue);
+    jl_value_t *loctag = NULL;  // debug info for invalidation
+    JL_GC_PUSH2(&oldvalue, &loctag);
     JL_LOCK(&mt->writelock);
     // first delete the existing entry (we'll disable it later)
     struct jl_typemap_assoc search = {(jl_value_t*)type, method->primary_world, NULL, 0, ~(size_t)0};
@@ -1739,12 +1761,11 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
             for (i = 1; i < na; i += 2) {
                 jl_value_t *backedgetyp = backedges[i - 1];
                 if (!jl_has_empty_intersection(backedgetyp, (jl_value_t*)type)) {
-                    if (_jl_debug_method_invalidation) {
-                        jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)backedgetyp);
-                    }
                     jl_method_instance_t *backedge = (jl_method_instance_t*)backedges[i];
                     invalidate_method_instance(backedge, max_world, 0);
                     invalidated = 1;
+                    if (_jl_debug_method_invalidation)
+                        jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)backedgetyp);
                 }
                 else {
                     backedges[ins++] = backedges[i - 1];
@@ -1790,13 +1811,27 @@ JL_DLLEXPORT void jl_method_table_insert(jl_methtable_t *mt, jl_method_t *method
             for (i = 0; i < l; i++) {
                 jl_method_instance_t *mi = (jl_method_instance_t*)jl_svecref(specializations, i);
                 if (mi != NULL && !jl_has_empty_intersection(type, (jl_value_t*)mi->specTypes))
-                    if (invalidate_backedges(mi, max_world))
+                    if (invalidate_backedges(mi, max_world)) {
                         invalidated = 1;
+                        if (_jl_debug_method_invalidation) {
+                            jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)mi);
+                            if (!loctag) {
+                                loctag = jl_cstr_to_string("jl_method_table_insert");
+                                jl_gc_wb(_jl_debug_method_invalidation, loctag);
+                            }
+                            jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
+                        }
+                    }
             }
         }
     }
     if (invalidated && _jl_debug_method_invalidation) {
         jl_array_ptr_1d_push(_jl_debug_method_invalidation, (jl_value_t*)method);
+        if (!loctag) {
+            loctag = jl_cstr_to_string("jl_method_table_insert");
+            jl_gc_wb(_jl_debug_method_invalidation, loctag);
+        }
+        jl_array_ptr_1d_push(_jl_debug_method_invalidation, loctag);
     }
     update_max_args(mt, type);
     JL_UNLOCK(&mt->writelock);
